@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jay's Demo Shelf</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #8fd3ff; --dot: #b5e3ff; --ink: #1d2340; --card: #ffffff; --muted: #5a6180;
+    --c1: #ff6b6b; --c2: #ffd93d; --c3: #6bcB77; --c4: #4d96ff; --c5: #c77dff; --c6: #ff9f45;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--ink);
+    font-family: Nunito, system-ui, sans-serif;
+    background-color: var(--bg);
+    background-image: radial-gradient(var(--dot) 18%, transparent 19%);
+    background-size: 28px 28px;
+  }
+  header { text-align: center; padding: 40px 16px 8px; }
+  h1 { font-family: Fredoka, sans-serif; font-size: clamp(36px, 7vw, 64px); margin: 0;
+       color: #fff; -webkit-text-stroke: 3px var(--ink); paint-order: stroke fill; letter-spacing: 1px; }
+  header p { margin: 8px 0 0; font-weight: 700; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px;
+         display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .card { background: var(--card); border: 4px solid var(--ink); border-radius: 22px;
+          box-shadow: 6px 6px 0 var(--ink); overflow: hidden; display: flex; flex-direction: column;
+          transition: transform .15s cubic-bezier(.3,1.8,.5,1); }
+  .card:hover { transform: translateY(-4px) rotate(-1deg); }
+  .band { height: 90px; display: grid; place-items: center; font-size: 46px; border-bottom: 4px solid var(--ink); }
+  .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  h2 { font-family: Fredoka, sans-serif; margin: 0; font-size: 24px; }
+  .desc { margin: 0; color: var(--muted); flex: 1; }
+  .btns { display: flex; gap: 10px; }
+  .btn { font-family: Fredoka, sans-serif; font-size: 18px; text-decoration: none; color: var(--ink);
+         border: 3px solid var(--ink); border-radius: 14px; padding: 6px 16px; box-shadow: 3px 3px 0 var(--ink); }
+  .btn:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 var(--ink); }
+  .play { background: var(--c2); flex: 1; text-align: center; }
+  .code { background: #eef1ff; }
+  .nodemo { font-size: 14px; color: var(--muted); align-self: center; flex: 1; }
+  footer { text-align: center; padding-bottom: 30px; font-weight: 700; }
+  footer a { color: var(--ink); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Jay's Demo Shelf</h1>
+  <p>Newest at the top. Tap Play to try one.</p>
+</header>
+<main id="grid"></main>
+<footer><a href="https://github.com/wakeupsilver">github.com/wakeupsilver</a></footer>
+
+<script>
+const USER = 'wakeupsilver';
+// Repos to leave off the shelf (this page itself and anything else you don't want shown).
+const HIDE = ['wakeupsilver.github.io'];
+// Optional nicer names/emoji. Repos not listed here still show up automatically.
+const EXTRA = {
+  '1derworld':                 { title: '1derworld', emoji: '🌮' },
+  'mad-libs-piano':            { title: 'Mad Libs Piano', emoji: '🎹' },
+  'mania-arena':               { title: 'Mania Arena', emoji: '🤼' },
+  'morph-lab':                 { title: 'Morph Lab', emoji: '🧪' },
+  'image-quilter':             { title: 'Image Quilter', emoji: '🧵' },
+  'bonkworks':                 { title: 'Bonkworks', emoji: '🔨' },
+  'scratch-portfolio-bedroom': { title: 'Scratch Portfolio Bedroom', emoji: '🛏️' },
+  'text-graph-convos':         { title: 'Conversation Universe', emoji: '🌌' },
+  'tic-tac-mania':             { title: 'Tic-Tac-Mania', emoji: '❌' },
+  'Visual-convos':             { title: 'Visual Convos', emoji: '💬' },
+  'wordcloud':                 { title: 'Word Cloud', emoji: '☁️' },
+};
+// Used only if GitHub can't be reached (offline, rate limit).
+const FALLBACK = [
+  ['image-quilter', true, 'Cut up one image and create another out of it'],
+  ['morph-lab', true, 'Morph between any two images, nine ways: patch migration, pixel swarm, spectral, liquid and more'],
+  ['mania-arena', true, 'Board games on maximum steroids: wrestling tic-tac-toe, chain-reaction four-in-a-row, royal rumble checkers'],
+  ['1derworld', true, 'Walk into a taco truck, slide into the sea, and step through portals into my apps'],
+  ['mad-libs-piano', true, 'A 25-key piano that sings songs one word per note. Wrong keys sing silly words.'],
+  ['text-graph-convos', true, 'Conversation Universe: a two-person conversation drawn as a living night sky of words.'],
+  ['bonkworks', true, 'A chain-reaction machine builder: pin parts to a pegboard, press GO, watch it bonk.'],
+  ['tic-tac-mania', true, 'Tic-tac-toe on maximum steroids.'],
+  ['scratch-portfolio-bedroom', false, "Type any Scratch username and walk into a 3D room built from that person's public projects."],
+  ['Visual-convos', true, ''],
+  ['wordcloud', true, ''],
+].map(([name, has_pages, description]) => ({ name, has_pages, description, fork: false }));
+
+const COLORS = ['--c1','--c2','--c3','--c4','--c5','--c6'];
+const EMOJI = ['🎲','🚀','🎨','🧩','🎈','⭐','🪄','🎮'];
+const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const pretty = n => n.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function render(repos) {
+  const list = repos
+    .filter(r => !r.archived && !HIDE.includes(r.name))
+    // Newest first (by creation date), so each new project lands at the top.
+    .sort((a, b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  document.getElementById('grid').innerHTML = list.map(r => {
+    const x = EXTRA[r.name] || {};
+    const h = hash(r.name);
+    const live = r.homepage || (r.has_pages ? `https://${USER}.github.io/${r.name}/` : '');
+    return `<article class="card">
+      <div class="band" style="background:var(${COLORS[h % COLORS.length]})">${x.emoji || EMOJI[h % EMOJI.length]}</div>
+      <div class="body">
+        <h2>${esc(x.title || pretty(r.name))}</h2>
+        <p class="desc">${esc(r.description || '')}</p>
+        <div class="btns">
+          ${live ? `<a class="btn play" href="${esc(live)}" target="_blank" rel="noopener">▶ Play</a>`
+                 : `<span class="nodemo">No live demo yet</span>`}
+          <a class="btn code" href="https://github.com/${USER}/${encodeURIComponent(r.name)}" target="_blank" rel="noopener">Code</a>
+        </div>
+      </div>
+    </article>`;
+  }).join('');
+}
+
+render(FALLBACK);
+fetch(`https://api.github.com/users/${USER}/repos?per_page=100&type=owner`)
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(render)
+  .catch(() => {});
+</script>
+</body>
+</html>
