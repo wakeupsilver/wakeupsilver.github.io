@@ -107,8 +107,8 @@ const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','
 function render(repos) {
   const list = repos
     .filter(r => !r.archived && !HIDE.includes(r.name))
-    // Newest first (by creation date), so each new project lands at the top.
-    .sort((a, b) => String(b.created_at||'').localeCompare(String(a.created_at||'')));
+    // Most recently published first, so whatever was worked on last is at the top.
+    .sort((a, b) => String(b.pushed_at||b.created_at||'').localeCompare(String(a.pushed_at||a.created_at||'')));
   document.getElementById('grid').innerHTML = list.map(r => {
     const x = EXTRA[r.name] || {};
     const h = hash(r.name);
