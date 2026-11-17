@@ -29,7 +29,8 @@
           box-shadow: 6px 6px 0 var(--ink); overflow: hidden; display: flex; flex-direction: column;
           transition: transform .15s cubic-bezier(.3,1.8,.5,1); }
   .card:hover { transform: translateY(-4px) rotate(-1deg); }
-  .band { height: 90px; display: grid; place-items: center; font-size: 46px; border-bottom: 4px solid var(--ink); }
+  .band { aspect-ratio: 16 / 10; overflow: hidden; border-bottom: 4px solid var(--ink); }
+  .band img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
   .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
   h2 { font-family: Fredoka, sans-serif; margin: 0; font-size: 24px; }
   .desc { margin: 0; color: var(--muted); flex: 1; }
@@ -55,24 +56,24 @@
 const USER = 'wakeupsilver';
 // Repos to leave off the shelf (this page itself and anything else you don't want shown).
 const HIDE = ['wakeupsilver.github.io'];
-// Optional nicer names/emoji. Repos not listed here still show up automatically.
+// Optional nicer names. Card pictures come from shots/<repo>.jpg. Repos not listed here still show up automatically.
 const EXTRA = {
-  'biofeedback':               { title: 'Signal Lab (Biofeedback)', emoji: '💓' },
-  'disco-scratch':             { title: 'Disco Scratch', emoji: '🪩' },
-  'recursive-scratch':         { title: 'Recursive Scratch', emoji: '🪆' },
-  'octostudio-scratch':        { title: 'OctoStudio for Scratch', emoji: '🐙' },
-  'disco-logo':                { title: 'Disco Logo', emoji: '🐢' },
-  '1derworld':                 { title: '1derworld', emoji: '🌮' },
-  'mad-libs-piano':            { title: 'Mad Libs Piano', emoji: '🎹' },
-  'mania-arena':               { title: 'Mania Arena', emoji: '🤼' },
-  'morph-lab':                 { title: 'Morph Lab', emoji: '🧪' },
-  'image-quilter':             { title: 'Image Quilter', emoji: '🧵' },
-  'bonkworks':                 { title: 'Bonkworks', emoji: '🔨' },
-  'scratch-portfolio-bedroom': { title: 'Scratch Portfolio Bedroom', emoji: '🛏️' },
-  'text-graph-convos':         { title: 'Conversation Universe', emoji: '🌌' },
-  'tic-tac-mania':             { title: 'Tic-Tac-Mania', emoji: '❌' },
-  'Visual-convos':             { title: 'Visual Convos', emoji: '💬' },
-  'wordcloud':                 { title: 'Word Cloud', emoji: '☁️' },
+  'biofeedback':               { title: 'Signal Lab (Biofeedback)' },
+  'disco-scratch':             { title: 'Disco Scratch' },
+  'recursive-scratch':         { title: 'Recursive Scratch' },
+  'octostudio-scratch':        { title: 'OctoStudio for Scratch' },
+  'disco-logo':                { title: 'Disco Logo' },
+  '1derworld':                 { title: '1derworld' },
+  'mad-libs-piano':            { title: 'Mad Libs Piano' },
+  'mania-arena':               { title: 'Mania Arena' },
+  'morph-lab':                 { title: 'Morph Lab' },
+  'image-quilter':             { title: 'Image Quilter' },
+  'bonkworks':                 { title: 'Bonkworks' },
+  'scratch-portfolio-bedroom': { title: 'Scratch Portfolio Bedroom' },
+  'text-graph-convos':         { title: 'Conversation Universe' },
+  'tic-tac-mania':             { title: 'Tic-Tac-Mania' },
+  'Visual-convos':             { title: 'Visual Convos' },
+  'wordcloud':                 { title: 'Word Cloud' },
 };
 // Used only if GitHub can't be reached (offline, rate limit).
 const FALLBACK = [
@@ -95,7 +96,6 @@ const FALLBACK = [
 ].map(([name, has_pages, description]) => ({ name, has_pages, description, fork: false }));
 
 const COLORS = ['--c1','--c2','--c3','--c4','--c5','--c6'];
-const EMOJI = ['🎲','🚀','🎨','🧩','🎈','⭐','🪄','🎮'];
 const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const pretty = n => n.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -110,7 +110,7 @@ function render(repos) {
     const h = hash(r.name);
     const live = r.homepage || (r.has_pages ? `https://${USER}.github.io/${r.name}/` : '');
     return `<article class="card">
-      <div class="band" style="background:var(${COLORS[h % COLORS.length]})">${x.emoji || EMOJI[h % EMOJI.length]}</div>
+      <div class="band" style="background:var(${COLORS[h % COLORS.length]})"><img src="shots/${encodeURIComponent(r.name)}.jpg" alt="" loading="lazy" onerror="this.remove()"></div>
       <div class="body">
         <h2>${esc(x.title || pretty(r.name))}</h2>
         <p class="desc">${esc(r.description || '')}</p>
