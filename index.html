@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jay's Demo Shelf</title>
+<title>JoyLabz Experiments</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
 <style>
@@ -46,8 +46,7 @@
 </head>
 <body>
 <header>
-  <h1>Jay's Demo Shelf</h1>
-  <p>Newest at the top. Tap Play to try one.</p>
+  <h1>JoyLabz Experiments</h1>
 </header>
 <main id="grid"></main>
 <footer><a href="https://github.com/wakeupsilver">github.com/wakeupsilver</a></footer>
@@ -118,7 +117,6 @@ function render(repos) {
         <div class="btns">
           ${live ? `<a class="btn play" href="${esc(live)}" target="_blank" rel="noopener">▶ Play</a>`
                  : `<span class="nodemo">No live demo yet</span>`}
-          <a class="btn code" href="https://github.com/${USER}/${encodeURIComponent(r.name)}" target="_blank" rel="noopener">Code</a>
         </div>
       </div>
     </article>`;
