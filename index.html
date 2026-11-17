@@ -58,6 +58,7 @@ const USER = 'wakeupsilver';
 const HIDE = ['wakeupsilver.github.io'];
 // Optional nicer names. Card pictures come from shots/<repo>.jpg. Repos not listed here still show up automatically.
 const EXTRA = {
+  'sips':                      { title: 'Sips' },
   'flow-lab':                  { title: 'Flow Lab' },
   'body-rave':                 { title: 'Body Rave' },
   'disco-scratch':             { title: 'Disco Scratch' },
@@ -78,6 +79,7 @@ const EXTRA = {
 };
 // Used only if GitHub can't be reached (offline, rate limit).
 const FALLBACK = [
+  ['sips', true, 'A breathing game: sips, box breathing and three Wim Hof rounds, played with your own breath.'],
   ['body-rave', true, 'Body Rave: your heart, face, hands and bones are the DJ. A webcam rave that turns your body into music and visuals. Nothing leaves your browser.'],
   ['disco-scratch', true, 'Disco Scratch: a neon-disco block-coding editor that runs inside Scratch, with nesting blocks, threads, custom blocks and 12 extensions.'],
   ['recursive-scratch', true, 'Scratch, inside Scratch, inside Scratch: a block editor and VM built from Scratch blocks, running its own mini Scratch.'],
