@@ -55,7 +55,7 @@
 <script>
 const USER = 'wakeupsilver';
 // Repos to leave off the shelf (this page itself and anything else you don't want shown).
-const HIDE = ['wakeupsilver.github.io'];
+const HIDE = ['wakeupsilver.github.io', 'wordcloud'];   // wordcloud: a fork whose live page is blank
 // Optional nicer names. Card pictures come from shots/<repo>.jpg. Repos not listed here still show up automatically.
 const EXTRA = {
   'sips':                      { title: 'Sips' },
@@ -75,7 +75,6 @@ const EXTRA = {
   'text-graph-convos':         { title: 'Conversation Universe' },
   'tic-tac-mania':             { title: 'Tic-Tac-Mania' },
   'Visual-convos':             { title: 'Visual Convos' },
-  'wordcloud':                 { title: 'Word Cloud' },
 };
 // Used only if GitHub can't be reached (offline, rate limit).
 const FALLBACK = [
@@ -96,7 +95,6 @@ const FALLBACK = [
   ['tic-tac-mania', true, 'Tic-tac-toe on maximum steroids.'],
   ['scratch-portfolio-bedroom', false, "Type any Scratch username and walk into a 3D room built from that person's public projects."],
   ['Visual-convos', true, ''],
-  ['wordcloud', true, ''],
 ].map(([name, has_pages, description]) => ({ name, has_pages, description, fork: false }));
 
 const COLORS = ['--c1','--c2','--c3','--c4','--c5','--c6'];
