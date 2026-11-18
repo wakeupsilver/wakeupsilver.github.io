@@ -337,14 +337,15 @@ function drawMole(m, s) {
   sx *= gs; sy *= gs;
   ctx.translate(mx, my + R); ctx.scale(sx, sy); ctx.translate(-mx, -(my + R));
   const gold = m.golden;
-  const body = gold ? '#FFC21A' : '#8B5A3C', belly = gold ? '#FFF0A8' : '#C99A74', dark = gold ? '#B07800' : '#5A3620';
+  const fur = FUR[m.layers] || FUR[1];
+  const body = gold ? '#FFC21A' : fur.body, belly = gold ? '#FFF0A8' : fur.belly, dark = gold ? '#B07800' : fur.dark;
   // body
   ctx.beginPath(); ctx.arc(mx, my, R, Math.PI, 0); ctx.lineTo(mx + R, my + R * 3); ctx.lineTo(mx - R, my + R * 3); ctx.closePath();
   ctx.fillStyle = body; ctx.fill();
   ctx.lineWidth = R * 0.07; ctx.strokeStyle = dark; ctx.stroke();
   // belly
   ctx.beginPath(); ctx.ellipse(mx, my + R * 0.75, R * 0.55, R * 0.6, 0, 0, 6.2832); ctx.fillStyle = belly; ctx.fill();
-  if (m.layers > 1) miniMole(mx, my + R * 0.78, R * 0.4, m.layers - 1);
+  if (m.layers > 1) miniMole(mx, my + R * 0.6, R * 0.45, m.layers - 1);
   // ears
   ctx.fillStyle = dark;
   ctx.beginPath(); ctx.arc(mx - R * 0.72, my - R * 0.62, R * 0.2, 0, 6.2832); ctx.arc(mx + R * 0.72, my - R * 0.62, R * 0.2, 0, 6.2832); ctx.fill();
@@ -390,9 +391,9 @@ function drawMole(m, s) {
   ctx.restore();
   // layer badge: how many moles deep this one goes
   if (m.layers > 1 && m.state !== 'hit') {
-    const bx = hx + r * 0.85, by = hy - r * 0.95 + off * 0.6, br = r * 0.3 * (1 + 0.08 * Math.sin(now * 10));
+    const bx = hx + r * 0.9, by = hy - r * 1.0 + off * 0.6, br = r * 0.38 * (1 + 0.1 * Math.sin(now * 10));
     ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fillStyle = '#111'; ctx.fill();
-    ctx.lineWidth = br * 0.18; ctx.strokeStyle = m.layers === 3 ? '#FF7A1A' : '#2EA8FF'; ctx.stroke();
+    ctx.lineWidth = br * 0.22; ctx.strokeStyle = FUR[m.layers].body; ctx.stroke();
     ctx.fillStyle = '#fff'; ctx.font = `900 ${br * 1.1}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText('×' + m.layers, bx, by + br * 0.05);
   }
@@ -405,19 +406,30 @@ function drawMole(m, s) {
     }
   }
 }
+// each nesting layer has its own fur so you can see how many are in there
+const FUR = {
+  1: { body: '#8B5A3C', belly: '#C99A74', dark: '#5A3620' },
+  2: { body: '#2E8FE8', belly: '#A9D8FF', dark: '#14548F' },
+  3: { body: '#FF7A1A', belly: '#FFD0A6', dark: '#A8430A' },
+};
 // a little mole face living in the belly of a bigger mole (recursively)
 function miniMole(x, y, r, n) {
-  ctx.beginPath(); ctx.arc(x - r * 0.75, y - r * 0.7, r * 0.28, 0, 6.2832); ctx.arc(x + r * 0.75, y - r * 0.7, r * 0.28, 0, 6.2832);
-  ctx.fillStyle = '#5A3620'; ctx.fill();
-  ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fillStyle = '#7A4A2E'; ctx.fill();
-  ctx.lineWidth = r * 0.08; ctx.strokeStyle = '#4a2c18'; ctx.stroke();
-  ctx.beginPath(); ctx.ellipse(x, y + r * 0.35, r * 0.6, r * 0.55, 0, 0, 6.2832); ctx.fillStyle = '#D8AE88'; ctx.fill();
+  const f = FUR[n];
+  // bright ring so the mole-in-a-mole jumps out
+  ctx.beginPath(); ctx.arc(x, y, r * 1.18, 0, 6.2832);
+  ctx.fillStyle = '#ffffff'; ctx.fill();
+  ctx.lineWidth = r * 0.14; ctx.strokeStyle = f.body; ctx.globalAlpha = 0.6 + 0.4 * Math.sin(now * 10 + n); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.beginPath(); ctx.arc(x - r * 0.72, y - r * 0.72, r * 0.26, 0, 6.2832); ctx.arc(x + r * 0.72, y - r * 0.72, r * 0.26, 0, 6.2832);
+  ctx.fillStyle = f.dark; ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fillStyle = f.body; ctx.fill();
+  ctx.lineWidth = r * 0.08; ctx.strokeStyle = f.dark; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.38, r * 0.62, r * 0.55, 0, 0, 6.2832); ctx.fillStyle = f.belly; ctx.fill();
   for (const sgn of [-1, 1]) {
-    ctx.beginPath(); ctx.arc(x + sgn * r * 0.35, y - r * 0.2, r * 0.17, 0, 6.2832); ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.beginPath(); ctx.arc(x + sgn * r * 0.35, y - r * 0.17, r * 0.1, 0, 6.2832); ctx.fillStyle = '#111'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x + sgn * r * 0.35, y - r * 0.22, r * 0.18, 0, 6.2832); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x + sgn * r * 0.35, y - r * 0.19, r * 0.1, 0, 6.2832); ctx.fillStyle = '#111'; ctx.fill();
   }
-  ctx.beginPath(); ctx.ellipse(x, y + r * 0.05, r * 0.2, r * 0.14, 0, 0, 6.2832); ctx.fillStyle = '#FF6FA0'; ctx.fill();
-  if (n > 1) miniMole(x, y + r * 0.5, r * 0.36, n - 1);
+  ctx.beginPath(); ctx.ellipse(x, y + r * 0.03, r * 0.2, r * 0.14, 0, 0, 6.2832); ctx.fillStyle = '#FF6FA0'; ctx.fill();
+  if (n > 1) miniMole(x, y + r * 0.42, r * 0.55, n - 1);
 }
 function drawStar(x, y, r, n, inner) {
   ctx.beginPath();
@@ -589,38 +601,45 @@ function startGame() {
   game.banner = { text: 'GO!', sub: 'whack with the arrows', t: 0, dur: 0.9, col: '#FFD100' };
   wave(CX, CY, Math.max(W, H) * 0.8, '#ffffff', 0.6);
 }
-// How many holes pop at once: mostly one, but two, three and even four get mixed in, more as you go deeper.
-function moleCount() {
-  const L = game.level, r = Math.random();
-  const p4 = L < 4 ? 0 : Math.min(0.14, 0.03 + L * 0.006);
-  const p3 = L < 2 ? 0 : Math.min(0.22, 0.06 + L * 0.008);
-  const p2 = Math.min(0.32, 0.18 + L * 0.008);
-  if (r < p4) return 4;
-  if (r < p4 + p3) return 3;
-  if (r < p4 + p3 + p2) return 2;
-  return 1;
+// The opening is scripted so the twists show up fast: two at once on board 3, three soon after,
+// a mole-in-a-mole by board 6, a triple-cap by board 9. After that it's a random mix that keeps getting wilder.
+// Each entry is one wave: the number of nested layers for each mole that pops.
+const OPENING = [[1], [1], [1, 1], [1], [1, 1, 1], [2], [1, 1], [2, 1], [3], [2, 1, 1]];
+function waveLayers() {
+  const L = game.level;
+  if (L < OPENING.length) return OPENING[L];
+  const r = Math.random();
+  const p4 = Math.min(0.16, 0.06 + (L - 10) * 0.006);
+  const p3 = Math.min(0.24, 0.14 + (L - 10) * 0.006);
+  const p2 = 0.3;
+  const n = r < p4 ? 4 : r < p4 + p3 ? 3 : r < p4 + p3 + p2 ? 2 : 1;
+  // with several moles up, nesting gets a bit rarer so a wave stays fair
+  const nestK = n === 1 ? 1 : n === 2 ? 0.8 : 0.55;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let layers = 1;
+    if (Math.random() < Math.min(0.4, 0.26 + (L - 10) * 0.005) * nestK) layers = 2;
+    if (Math.random() < Math.min(0.2, 0.1 + (L - 10) * 0.004) * nestK) layers = 3;
+    out.push(layers);
+  }
+  return out;
 }
 function spawnMole() {
   const D = difficulty();
-  const n = moleCount();
+  const lay = waveLayers(), n = lay.length;
   const dirs = [0, 1, 2, 3].sort(() => Math.random() - 0.5).slice(0, n);
   if (n === 1 && game.lastDir === dirs[0] && Math.random() < 0.6) dirs[0] = (dirs[0] + 1 + ((Math.random() * 3) | 0)) % 4;
   game.lastDir = dirs[0];
-  // Fractal moles: once the game gets going, some moles have a mole inside them (and sometimes another inside that).
-  // With several moles up, nesting gets a bit rarer so a wave stays fair.
-  const nestK = n === 1 ? 1 : n === 2 ? 0.8 : 0.55;
   game.moles = dirs.map((dir, i) => {
-    let layers = 1;
-    if (game.level >= 6 && Math.random() < 0.24 * nestK) layers = 2;
-    if (game.level >= 10 && Math.random() < 0.11 * nestK) layers = 3;
+    const layers = lay[i];
     const golden = layers === 1 && n === 1 && game.level >= 3 && Math.random() < 0.09;
     // more moles (and more layers) = more time to clear them all
     const life = D.life * (1 + 0.4 * (n - 1)) * (1 + 0.25 * (layers - 1));
-    return { dir, up: 0, state: 'rise', delay: i * 0.07, life, maxLife: life, golden, hitT: 0, layers, total: layers, grow: 1 };
+    return { dir, up: 0, state: 'rise', delay: 0, life, maxLife: life, golden, hitT: 0, layers, total: layers, grow: 1 };
   });
   game.phase = 'mole';
   if (n > 1) popup(0, -0.02, n === 2 ? 'DOUBLE!' : n === 3 ? 'TRIPLE!' : 'ALL FOUR!', DCOL[n - 1], 0.9 + n * 0.1, 0.7);
-  game.moles.forEach((m, i) => setTimeout(() => sfx.pop(), i * 70));
+  sfx.pop(); if (n > 1) tone(880, 0.09, 'triangle', 0.08, 1300);
 }
 function whack(d) {
   press[d] = 1;
