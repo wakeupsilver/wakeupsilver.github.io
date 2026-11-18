@@ -145,7 +145,7 @@ body.demo .sens { display: none; }
 <div id="controls">
   <label class="sens" title="How easily something counts as the top">sensitivity <input type="range" id="sens" min="0" max="1" step="0.01" value="0.55"></label>
   <button data-act="reset" title="Re-learn the empty table (R)">🔄</button>
-  <button data-act="solo" title="Bring in a soloist, or send one off (S)">🎺</button>
+  <button data-act="solo" title="Next solo instrument (S)">🎺</button>
   <button data-act="shuffle" title="New stage layout and key (N)">🎲</button>
   <button data-act="flip" class="camonly" title="Switch camera (F)">📷</button>
   <button data-act="feed" title="Show or hide the camera picture (V)">👁</button>
@@ -171,7 +171,7 @@ body.demo .sens { display: none; }
       </g>
     </svg>
     <h1>Top<br>Ensemble</h1>
-    <p class="tag">Spin a top across the table and it conducts the band. Every patch of table is a different musician, so wherever your top wanders, the music follows. Now and then a soloist steps up and plays a note for every step of its path.</p>
+    <p class="tag">Spin a top across the table and it conducts the band. Every patch of table is a different musician, so wherever your top wanders, the music follows. The top is a soloist too: it plays a note for every step of its path, switching instruments as it goes.</p>
     <div class="btns">
       <button id="go-cam" class="big">📷 Start the camera</button>
       <button id="go-demo">🌀 Try the demo top</button>
@@ -645,24 +645,31 @@ window.Sound = (() => {
       fm(t, f * 4, { ratio: 1, index: .3, iDecay: .1, dur: .3, vol: .03 * v, p });
     },
   };
-  const solo = { on: false, i: -1, until: 6, lastT: 0 };
+  const solo = { on: false, i: -1, until: 0, lastT: 0 };
   let soloListener = null;
   const NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
 
+  // The top is nearly always playing: each soloist plays 4–6 bars, then the next one takes over.
+  // Only now and then (about 1 change in 7) is there a one-bar breath in between.
+  function startSolo(bar) {
+    let i; do { i = (Math.random() * SOLOISTS.length) | 0; } while (i === solo.i && SOLOISTS.length > 1);
+    solo.on = true; solo.i = i; solo.until = bar + 4 + ((Math.random() * 3) | 0);
+    if (soloListener) soloListener(SOLOISTS[i]);
+  }
   function soloTurn(bar) {
     if (bar < solo.until) return;
-    if (solo.on) { solo.on = false; solo.until = bar + 2 + ((Math.random() * 3) | 0); }
-    else if (ctl.found) {
-      let i; do { i = (Math.random() * SOLOISTS.length) | 0; } while (i === solo.i && SOLOISTS.length > 1);
-      solo.on = true; solo.i = i; solo.until = bar + 4 + ((Math.random() * 5) | 0);
-    } else return;
-    if (soloListener) soloListener(solo.on ? SOLOISTS[solo.i] : null);
+    if (solo.on) {
+      if (Math.random() < 0.15) { solo.on = false; solo.until = bar + 1; if (soloListener) soloListener(null); }
+      else startSolo(bar);
+    } else if (ctl.found) startSolo(bar);
   }
 
   // Called by the game each time the top has travelled one "note length" along its path.
   // Pitch comes straight from position: higher on screen is higher, so the same spot is the same note.
   function soloNote(x, y, v) {
-    if (!ctx || muted || !solo.on) return null;
+    if (!ctx || muted) return null;
+    if (!solo.on && step / 16 >= solo.until) startSolo(Math.floor(step / 16));   // don't wait for the bar line to start
+    if (!solo.on) return null;
     const t = ctx.currentTime;
     if (t - solo.lastT < 0.075) return null;
     solo.lastT = t;
@@ -758,7 +765,7 @@ window.Sound = (() => {
   function setZones(z, a) { zones = z; acts = a; }
   function setMuted(m) { muted = m; if (master) master.gain.setTargetAtTime(m ? 0 : 0.85, ctx.currentTime, 0.05); }
 
-  function forceSolo() { solo.until = 0; soloTurn(Math.floor(step / 16)); solo.until = Math.floor(step / 16) + (solo.on ? 6 : 3); }
+  function forceSolo() { startSolo(Math.floor(step / 16)); }   // skip to the next instrument
 
   return { init, setZones, control, accent, bounce, fanfare, newScene, setMuted, onNote: f => (listener = f), now,
     soloNote, forceSolo, onSolo: f => (soloListener = f), get solo() { return solo.on ? SOLOISTS[solo.i] : null; }, get muted() { return muted; }, get ready() { return !!ctx; } };
@@ -938,7 +945,7 @@ window.Demo = (() => {
   }
   Sound.onSolo(s => {
     const b = $('#solo');
-    if (s) { chip(s, 'takes a solo!'); b.innerHTML = `<b>${s.emoji}</b> ${s.name} <i>SOLO</i>`; b.style.setProperty('--c', s.color); b.classList.add('show'); }
+    if (s) { chip(s, soloist ? 'takes over the solo!' : 'takes a solo!'); b.innerHTML = `<b>${s.emoji}</b> ${s.name} <i>SOLO</i>`; b.style.setProperty('--c', s.color); b.classList.add('show'); }
     else { if (soloist) chip(soloist, 'takes a bow'); b.classList.remove('show'); }
     soloist = s;
   });
