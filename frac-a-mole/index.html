@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Frac-a-Mole · Makey Makey</title>
+<meta name="description" content="Frac-a-Mole: fractal whack-a-mole for Makey Makey. Whack a mole and dive into its hole, where four more are waiting. Forever.">
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0709; overflow: hidden; touch-action: none;
+               -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+'use strict';
+// ============================================================================
+//  FRAC-A-MOLE  ·  fractal whack-a-mole for Makey Makey
+//  Arrow keys (or WASD, or taps) whack the four holes. Every hit zooms you into
+//  the hole you hit, where a whole new board is waiting. Forever.
+// ============================================================================
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, B = 300, CX = 0, CY = 0, U = 1;
+
+// ---------- board geometry (board = 1x1 square, centred on 0,0) ----------
+const HOFF = 0.29;            // hole centre distance from board centre
+const HR = 0.15;              // hole radius
+const K = 0.21;               // child board size inside a hole (fits the hole circle)
+const CORNER = 0.09;
+const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];          // up, right, down, left
+const DNAME = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+const DCOL = ['#FFD100', '#2EA8FF', '#2ECC55', '#FF7A1A'];   // alligator-clip colours
+const ARROW = ['↑', '→', '↓', '←'];
+const PAL = [
+  { fill: '#E5232B', edge: '#A3121A', trace: 'rgba(255,255,255,0.32)', pad: 'rgba(255,255,255,0.75)', dpad: 'rgba(255,255,255,0.9)' },
+  { fill: '#F6F2E9', edge: '#B9B2A2', trace: 'rgba(229,35,43,0.30)',   pad: 'rgba(229,35,43,0.7)',    dpad: 'rgba(229,35,43,0.9)' },
+  { fill: '#24242A', edge: '#0d0d10', trace: 'rgba(255,209,0,0.28)',   pad: 'rgba(255,209,0,0.75)',   dpad: 'rgba(255,209,0,0.95)' },
+];
+const HOLE_BG = '#0b0709';
+const FONT = '"Arial Rounded MT Bold","Nunito","SF Pro Rounded",ui-rounded,"Trebuchet MS",system-ui,sans-serif';
+
+// ---------- helpers ----------
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOutBack = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+const easeOut = t => 1 - Math.pow(1 - t, 3);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+function fmtMag(n) {
+  const m = Math.pow(1 / K, n);
+  if (m < 10000) return Math.round(m).toLocaleString();
+  const e = Math.floor(Math.log10(m));
+  return (m / Math.pow(10, e)).toFixed(1) + 'e' + e;
+}
+
+// ---------- audio: everything synthesised ----------
+let AC = null, master = null, muted = store.get('fracamole_muted', false);
+function audioInit() {
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  try {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    master = AC.createGain(); master.gain.value = muted ? 0 : 0.38;
+    const comp = AC.createDynamicsCompressor();
+    master.connect(comp); comp.connect(AC.destination);
+  } catch (e) { AC = null; }
+}
+function tone(f, dur, type = 'square', vol = 0.2, f2 = null, delay = 0) {
+  if (!AC) return;
+  const t = AC.currentTime + delay;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if (f2) o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.02);
+}
+let noiseBuf = null;
+function noise(dur, vol, f1, f2, delay = 0, q = 1) {
+  if (!AC) return;
+  if (!noiseBuf) {
+    noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const t = AC.currentTime + delay;
+  const s = AC.createBufferSource(); s.buffer = noiseBuf;
+  const f = AC.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = q;
+  f.frequency.setValueAtTime(f1, t); f.frequency.exponentialRampToValueAtTime(f2, t + dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t + dur + 0.02);
+}
+// Per Nørgård's "infinity series" — a self-similar melody. Every hit plays the next note,
+// so the soundtrack of your run is itself a fractal.
+const norgMemo = [0];
+function norg(n) {
+  if (norgMemo[n] !== undefined) return norgMemo[n];
+  const v = (n % 2 === 0) ? -norg(n / 2) : norg((n - 1) / 2) + 1;
+  norgMemo[n] = v; return v;
+}
+const PENTA = [0, 2, 4, 7, 9];
+function norgFreq(n) {
+  const deg = norg(n) + 5;
+  const oct = Math.floor(deg / 5), step = ((deg % 5) + 5) % 5;
+  return 261.63 * Math.pow(2, oct + PENTA[step] / 12 - 1);
+}
+const sfx = {
+  hit(n, combo, golden) {
+    const f = norgFreq(n);
+    tone(f, 0.22, 'square', 0.16); tone(f * 2, 0.16, 'triangle', 0.12, null, 0.02);
+    tone(f * 1.5, 0.3, 'sine', 0.10, null, 0.05);
+    noise(0.12, 0.5, 2400, 400, 0, 0.8);               // bonk
+    tone(150, 0.12, 'sine', 0.35, 50);                  // thump
+    if (combo >= 4) tone(f * 4, 0.12, 'sine', 0.06, null, 0.08);
+    if (golden) [0, 1, 2, 3, 4].forEach(i => tone(f * Math.pow(2, i / 2.5), 0.15, 'triangle', 0.07, null, 0.06 * i));
+  },
+  zoom(dur) { noise(dur, 0.22, 300, 6000, 0, 2.5); tone(110, dur, 'sawtooth', 0.05, 880); },
+  pop() { tone(rand(500, 620), 0.07, 'sine', 0.10, 900); },
+  wrong() { tone(140, 0.25, 'sawtooth', 0.16, 70); tone(147, 0.25, 'square', 0.08, 72); },
+  escape() { [0, 1, 2].forEach(i => tone(520 - i * 110, 0.12, 'triangle', 0.12, null, i * 0.09)); },
+  life() { [0, 1, 2, 3].forEach(i => tone(523 * Math.pow(1.26, i), 0.14, 'square', 0.08, null, i * 0.07)); },
+  over() { [0, 1, 2, 3, 4, 5].forEach(i => tone(392 * Math.pow(0.84, i), 0.2, 'square', 0.10, null, i * 0.11)); },
+  start() { [0, 1, 2].forEach(i => tone(392 * Math.pow(1.335, i), 0.12, 'square', 0.10, null, i * 0.08)); },
+  tick() { tone(1200, 0.03, 'square', 0.04); },
+};
+function toggleMute() {
+  muted = !muted; store.set('fracamole_muted', muted);
+  if (master) master.gain.value = muted ? 0 : 0.38;
+}
+
+// ---------- world & camera ----------
+// The current board is always the unit square at the origin. Zooming moves the camera into a
+// hole; when the zoom lands we re-base the world so the child board becomes the unit square.
+const cam = { x: 0, y: 0, z: 1, rot: 0 };
+let shakeX = 0, shakeY = 0, trauma = 0;
+let worldDepth = 0;                               // palette index of the current board
+const history = [(Math.random() * 4) | 0, (Math.random() * 4) | 0];   // path from ancestors
+let zoom = null;                                  // { dir, t, dur, spin }
+
+function S() { return cam.z * B; }
+function toScreen(wx, wy) {
+  let dx = (wx - cam.x) * S(), dy = (wy - cam.y) * S();
+  const c = Math.cos(cam.rot), s = Math.sin(cam.rot);
+  return [CX + shakeX + dx * c - dy * s, CY + shakeY + dx * s + dy * c];
+}
+function toWorld(sx, sy) {
+  const dx = sx - CX - shakeX, dy = sy - CY - shakeY;
+  const c = Math.cos(-cam.rot), s = Math.sin(-cam.rot);
+  return [(dx * c - dy * s) / S() + cam.x, (dx * s + dy * c) / S() + cam.y];
+}
+function applyCam() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.translate(CX + shakeX, CY + shakeY);
+  ctx.rotate(cam.rot);
+  ctx.scale(S(), S());
+  ctx.translate(-cam.x, -cam.y);
+}
+function startZoom(dir, dur) {
+  zoom = { dir, t: 0, dur, spin: (Math.random() < 0.5 ? -1 : 1) * rand(0.10, 0.2) };
+  if (game.mode === 'play') sfx.zoom(dur);
+}
+function updateZoom(dt) {
+  if (!zoom) return;
+  zoom.t = Math.min(1, zoom.t + dt / zoom.dur);
+  const e = easeInOut(zoom.t);
+  const z = Math.pow(1 / K, e);
+  const tx = DX[zoom.dir] * HOFF, ty = DY[zoom.dir] * HOFF;
+  const f = (1 - 1 / z) / (1 - K);
+  cam.z = z; cam.x = tx * f; cam.y = ty * f;
+  cam.rot = Math.sin(Math.PI * e) * zoom.spin;
+  if (zoom.t >= 1) landZoom();
+}
+function landZoom() {
+  const d = zoom.dir, tx = DX[d] * HOFF, ty = DY[d] * HOFF;
+  const rebase = o => { o.x = (o.x - tx) / K; o.y = (o.y - ty) / K; };
+  parts.forEach(p => { rebase(p); p.vx /= K; p.vy /= K; p.size /= K; });
+  pops.forEach(rebase);
+  bolts.forEach(b => b.segs.forEach(s => { s[0] = (s[0] - tx) / K; s[1] = (s[1] - ty) / K; s[2] = (s[2] - tx) / K; s[3] = (s[3] - ty) / K; }));
+  history.push(d); if (history.length > 3) history.shift();
+  worldDepth++;
+  cam.x = 0; cam.y = 0; cam.z = 1; cam.rot = 0;
+  zoom = null;
+  onZoomLanded(d);
+}
+
+// ---------- drawing the fractal ----------
+let viewR = 1;   // world-space radius of the visible area (for culling)
+function rrect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+// H-tree: the classic fractal used to route clock signals on real chips — our circuit traces.
+function hTree(path, pads, x, y, len, horiz, depth) {
+  const ax = horiz ? x - len / 2 : x, ay = horiz ? y : y - len / 2;
+  const bx = horiz ? x + len / 2 : x, by = horiz ? y : y + len / 2;
+  path.moveTo(ax, ay); path.lineTo(bx, by);
+  if (depth <= 0) { pads.push(ax, ay, bx, by); return; }
+  const nl = len / Math.SQRT2;
+  hTree(path, pads, ax, ay, nl, !horiz, depth - 1);
+  hTree(path, pads, bx, by, nl, !horiz, depth - 1);
+}
+function drawBoard(x, y, s, depth, path, time) {
+  const sc = S();
+  const px = s * sc;
+  if (px < 2.5) return;
+  // cull boards that are completely off screen
+  const dx = x - cam.x, dy = y - cam.y;
+  if (Math.sqrt(dx * dx + dy * dy) - s * 0.72 > viewR) return;
+  const pal = PAL[((depth % 3) + 3) % 3];
+  const isCur = path && path.length === 0;
+  const h = s / 2;
+
+  // board body
+  rrect(x - h, y - h, s, s, s * CORNER);
+  ctx.fillStyle = pal.fill; ctx.fill();
+  if (px > 30) { ctx.lineWidth = s * 0.018; ctx.strokeStyle = pal.edge; ctx.stroke(); }
+
+  // fractal circuit traces
+  if (px > 45) {
+    const hd = clamp(Math.floor(Math.log2(px / 22)), 1, 6);
+    const p = new Path2D(), pads = [];
+    hTree(p, pads, x, y, s * 0.5, true, hd);
+    ctx.lineWidth = Math.max(s * 0.008, 0.9 / sc);
+    ctx.strokeStyle = pal.trace;
+    if (isCur && game.mode === 'play') {
+      // a pulse runs along the traces in time with the combo
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(time * (4 + game.combo));
+    }
+    ctx.stroke(p);
+    ctx.globalAlpha = 1;
+    if (px > 140) {
+      ctx.fillStyle = pal.pad;
+      const pr = s * 0.009;
+      ctx.beginPath();
+      for (let i = 0; i < pads.length; i += 2) { ctx.moveTo(pads[i] + pr, pads[i + 1]); ctx.arc(pads[i], pads[i + 1], pr, 0, 6.2832); }
+      ctx.fill();
+    }
+  }
+
+  // centre D-pad, like a Makey Makey board
+  if (px > 60) {
+    for (let d = 0; d < 4; d++) {
+      const glow = isCur ? press[d] : 0;
+      const cx = x + DX[d] * s * 0.075, cy = y + DY[d] * s * 0.075;
+      const a = Math.atan2(DY[d], DX[d]), r = s * 0.038 * (1 + glow * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      ctx.lineTo(cx + Math.cos(a + 2.4) * r, cy + Math.sin(a + 2.4) * r);
+      ctx.lineTo(cx + Math.cos(a - 2.4) * r, cy + Math.sin(a - 2.4) * r);
+      ctx.closePath();
+      ctx.fillStyle = glow > 0.05 ? DCOL[d] : pal.dpad;
+      ctx.fill();
+    }
+  }
+
+  // the four holes, each containing a whole new board (recursion!)
+  for (let d = 0; d < 4; d++) {
+    const hx = x + DX[d] * HOFF * s, hy = y + DY[d] * HOFF * s, r = HR * s;
+    // rim
+    ctx.beginPath(); ctx.arc(hx, hy, r * 1.13, 0, 6.2832);
+    ctx.fillStyle = DCOL[d]; ctx.fill();
+    // portal
+    ctx.save();
+    ctx.beginPath(); ctx.arc(hx, hy, r, 0, 6.2832);
+    ctx.fillStyle = HOLE_BG; ctx.fill();
+    ctx.clip();
+    const childPath = (path && path.length > 0 && path[0] === d) ? path.slice(1) : null;
+    drawBoard(hx, hy, s * K, depth + 1, childPath, time);
+    if (px > 70) {
+      const g = ctx.createRadialGradient(hx, hy, r * 0.55, hx, hy, r);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.7)');
+      ctx.fillStyle = g; ctx.fillRect(hx - r, hy - r, r * 2, r * 2);
+    }
+    ctx.restore();
+    if (isCur) drawHoleFx(d, hx, hy, r, s);
+  }
+  if (isCur) drawMole(s);
+}
+function drawHoleFx(d, hx, hy, r, s) {
+  // wrong-hole flash
+  if (flash[d] > 0.01) {
+    ctx.beginPath(); ctx.arc(hx, hy, r * (1.13 + 0.25 * (1 - flash[d])), 0, 6.2832);
+    ctx.lineWidth = r * 0.18 * flash[d]; ctx.strokeStyle = `rgba(255,40,40,${flash[d]})`; ctx.stroke();
+  }
+  // press ring
+  if (press[d] > 0.01) {
+    ctx.beginPath(); ctx.arc(hx, hy, r * (1.15 + 0.5 * (1 - press[d])), 0, 6.2832);
+    ctx.lineWidth = r * 0.08 * press[d]; ctx.strokeStyle = DCOL[d]; ctx.globalAlpha = press[d]; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  // countdown ring for the live mole
+  const m = game.mole;
+  if (m && m.dir === d && (m.state === 'up' || m.state === 'rise') && game.mode === 'play') {
+    const f = clamp(m.life / m.maxLife, 0, 1);
+    ctx.beginPath(); ctx.arc(hx, hy, r * 1.32, -Math.PI / 2, -Math.PI / 2 + 6.2832 * f);
+    ctx.lineWidth = r * 0.12; ctx.lineCap = 'round';
+    ctx.strokeStyle = f < 0.3 ? '#ff3b3b' : (m.golden ? '#FFE680' : '#ffffff'); ctx.stroke(); ctx.lineCap = 'butt';
+  }
+  // arrow label on the rim (only on the live board)
+  if (s * S() > 200) {
+    const lx = hx + DX[d] * r * 1.13, ly = hy + DY[d] * r * 1.13;
+    ctx.beginPath(); ctx.arc(lx, ly, r * 0.22, 0, 6.2832);
+    ctx.fillStyle = '#111'; ctx.fill();
+    ctx.fillStyle = DCOL[d];
+    ctx.font = `900 ${r * 0.3}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(ARROW[d], lx, ly + r * 0.01);
+  }
+}
+
+// ---------- the mole ----------
+function drawMole(s) {
+  const m = game.mole; if (!m) return;
+  const d = m.dir, r = HR * s;
+  const hx = DX[d] * HOFF * s, hy = DY[d] * HOFF * s;
+  const up = m.state === 'rise' ? easeOutBack(m.up) : m.up;
+  const R = r * 0.74;
+  const off = (1 - up) * r * 2.1;
+  ctx.save();
+  // clip: lower half of the hole + everything above it, so the mole pops out of the ground
+  ctx.beginPath();
+  ctx.moveTo(hx - r * 1.6, hy - r * 2.6); ctx.lineTo(hx - r, hy);
+  ctx.arc(hx, hy, r, Math.PI, 0, true);
+  ctx.lineTo(hx + r * 1.6, hy - r * 2.6); ctx.closePath(); ctx.clip();
+  let sx = 1, sy = 1;
+  if (m.state === 'hit') { const k = Math.min(1, m.hitT * 6); sx = 1 + 0.35 * (1 - k * 0.5); sy = 0.6 + 0.2 * k; }
+  else if (m.state === 'rise') { sy = 0.9 + 0.2 * Math.sin(m.up * Math.PI); sx = 1 / sy; }
+  const mx = hx, my = hy - r * 0.05 + off;
+  ctx.translate(mx, my + R); ctx.scale(sx, sy); ctx.translate(-mx, -(my + R));
+  const gold = m.golden;
+  const body = gold ? '#FFC21A' : '#8B5A3C', belly = gold ? '#FFF0A8' : '#C99A74', dark = gold ? '#B07800' : '#5A3620';
+  // body
+  ctx.beginPath(); ctx.arc(mx, my, R, Math.PI, 0); ctx.lineTo(mx + R, my + R * 3); ctx.lineTo(mx - R, my + R * 3); ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();
+  ctx.lineWidth = R * 0.07; ctx.strokeStyle = dark; ctx.stroke();
+  // belly
+  ctx.beginPath(); ctx.ellipse(mx, my + R * 0.75, R * 0.55, R * 0.6, 0, 0, 6.2832); ctx.fillStyle = belly; ctx.fill();
+  // ears
+  ctx.fillStyle = dark;
+  ctx.beginPath(); ctx.arc(mx - R * 0.72, my - R * 0.62, R * 0.2, 0, 6.2832); ctx.arc(mx + R * 0.72, my - R * 0.62, R * 0.2, 0, 6.2832); ctx.fill();
+  // a tiny alligator clip on its head, in its hole's colour
+  ctx.save(); ctx.translate(mx + R * 0.25, my - R * 0.95); ctx.rotate(-0.4);
+  ctx.fillStyle = DCOL[d]; rrect(-R * 0.28, -R * 0.08, R * 0.56, R * 0.16, R * 0.06); ctx.fill();
+  ctx.fillStyle = '#ddd'; ctx.fillRect(R * 0.2, -R * 0.06, R * 0.18, R * 0.12);
+  ctx.restore();
+  // eyes
+  const ey = my - R * 0.22, ex = R * 0.32;
+  if (m.state === 'hit') {
+    ctx.strokeStyle = '#111'; ctx.lineWidth = R * 0.09; ctx.lineCap = 'round';
+    for (const sgn of [-1, 1]) {
+      const cx = mx + sgn * ex, k = R * 0.11;
+      ctx.beginPath(); ctx.moveTo(cx - k, ey - k); ctx.lineTo(cx + k, ey + k); ctx.moveTo(cx + k, ey - k); ctx.lineTo(cx - k, ey + k); ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+  } else {
+    const look = m.state === 'hide' ? 0.04 : 0;
+    for (const sgn of [-1, 1]) {
+      ctx.beginPath(); ctx.arc(mx + sgn * ex, ey, R * 0.15, 0, 6.2832); ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.beginPath(); ctx.arc(mx + sgn * ex + R * look * sgn, ey + R * 0.03, R * 0.085, 0, 6.2832); ctx.fillStyle = '#111'; ctx.fill();
+      ctx.beginPath(); ctx.arc(mx + sgn * ex + R * 0.04, ey - R * 0.03, R * 0.03, 0, 6.2832); ctx.fillStyle = '#fff'; ctx.fill();
+    }
+  }
+  // cheeks
+  ctx.fillStyle = 'rgba(255,110,150,0.45)';
+  ctx.beginPath(); ctx.ellipse(mx - R * 0.55, my + R * 0.05, R * 0.14, R * 0.09, 0, 0, 6.2832); ctx.ellipse(mx + R * 0.55, my + R * 0.05, R * 0.14, R * 0.09, 0, 0, 6.2832); ctx.fill();
+  // nose & teeth
+  ctx.beginPath(); ctx.ellipse(mx, my + R * 0.08, R * 0.19, R * 0.13, 0, 0, 6.2832); ctx.fillStyle = '#FF6FA0'; ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.fillRect(mx - R * 0.11, my + R * 0.24, R * 0.1, R * 0.15); ctx.fillRect(mx + R * 0.01, my + R * 0.24, R * 0.1, R * 0.15);
+  // whiskers
+  ctx.strokeStyle = dark; ctx.lineWidth = R * 0.03;
+  ctx.beginPath();
+  for (const sgn of [-1, 1]) for (const k of [-1, 0, 1]) { ctx.moveTo(mx + sgn * R * 0.25, my + R * 0.12); ctx.lineTo(mx + sgn * R * 0.75, my + R * (0.05 + k * 0.1)); }
+  ctx.stroke();
+  // golden glint
+  if (gold) {
+    const t = now * 4;
+    ctx.fillStyle = '#fff';
+    drawStar(mx + R * 0.6 * Math.cos(t), my - R * 0.4 + R * 0.2 * Math.sin(t * 1.3), R * 0.16, 4, 0.35);
+  }
+  ctx.restore();
+  // dizzy stars after a hit
+  if (m.state === 'hit') {
+    for (let i = 0; i < 3; i++) {
+      const a = now * 7 + i * 2.094;
+      ctx.fillStyle = DCOL[(i + d) % 4];
+      drawStar(hx + Math.cos(a) * R * 0.8, hy - R * 1.2 + Math.sin(a) * R * 0.25, R * 0.17, 5, 0.45);
+    }
+  }
+}
+function drawStar(x, y, r, n, inner) {
+  ctx.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / n, rr = i % 2 ? r * inner : r;
+    i ? ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr) : ctx.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+// ---------- juice: particles, lightning, shockwaves, popups ----------
+const parts = [], pops = [], bolts = [], waves = [];
+let flashA = 0, flashCol = '255,255,255', hitstop = 0;
+// Branching sparks: each one splits in two halfway through its life — fireworks that are fractal trees.
+function burst(wx, wy, n, colors, speed = 520) {
+  const sc = S();
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, 6.2832), v = rand(0.35, 1) * speed;
+    parts.push({ x: wx, y: wy, vx: Math.cos(a) * v / sc, vy: Math.sin(a) * v / sc, life: rand(0.35, 0.6), max: 0, size: rand(2.5, 5) / sc,
+      col: colors[(Math.random() * colors.length) | 0], gen: 0, split: false });
+    parts[parts.length - 1].max = parts[parts.length - 1].life;
+  }
+}
+function updateParts(dt) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.vx *= Math.pow(0.12, dt); p.vy *= Math.pow(0.12, dt);
+    p.vy += 600 / B * dt * (p.gen ? 0.5 : 1) / cam.z;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (!p.split && p.gen < 3 && p.life < p.max * 0.55) {
+      p.split = true;
+      if (parts.length < 900) for (const sgn of [-1, 1]) {
+        const a = Math.atan2(p.vy, p.vx) + sgn * rand(0.3, 0.6), v = Math.hypot(p.vx, p.vy) * 1.3;
+        const l = p.max * 0.6;
+        parts.push({ x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: l, max: l, size: p.size * 0.68, col: p.col, gen: p.gen + 1, split: false });
+      }
+    }
+  }
+}
+function drawParts() {
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  for (const p of parts) {
+    const k = p.life / p.max;
+    ctx.globalAlpha = Math.min(1, k * 1.5);
+    ctx.strokeStyle = p.col;
+    ctx.lineWidth = p.size * (0.4 + k);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035); ctx.stroke();
+  }
+  ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+  ctx.globalCompositeOperation = 'source-over';
+}
+// Fractal lightning (midpoint displacement + branching) — Makey Makey is all about the circuit closing.
+function makeBolt(ax, ay, bx, by, disp, depth, segs, branchy) {
+  if (depth === 0) { segs.push([ax, ay, bx, by, branchy]); return; }
+  const mx = (ax + bx) / 2, my = (ay + by) / 2;
+  const len = Math.hypot(bx - ax, by - ay) || 1;
+  const nx = -(by - ay) / len, ny = (bx - ax) / len;
+  const o = rand(-disp, disp);
+  const px = mx + nx * o, py = my + ny * o;
+  makeBolt(ax, ay, px, py, disp / 2, depth - 1, segs, branchy);
+  makeBolt(px, py, bx, by, disp / 2, depth - 1, segs, branchy);
+  if (depth >= 3 && Math.random() < 0.35) {
+    const a = Math.atan2(by - ay, bx - ax) + rand(-0.8, 0.8), l = len * rand(0.3, 0.55);
+    makeBolt(px, py, px + Math.cos(a) * l, py + Math.sin(a) * l, disp / 2.5, depth - 2, segs, branchy + 1);
+  }
+}
+function zap(tx, ty, col) {
+  const [sx, sy] = toWorld(rand(W * 0.2, W * 0.8), -20);
+  const segs = [];
+  const len = Math.hypot(tx - sx, ty - sy);
+  makeBolt(sx, sy, tx, ty, len * 0.22, 7, segs, 0);
+  bolts.push({ segs, life: 0.28, max: 0.28, col });
+}
+function drawBolts() {
+  ctx.globalCompositeOperation = 'lighter';
+  const sc = S();
+  for (const b of bolts) {
+    const k = b.life / b.max, fl = Math.random() < 0.25 ? 0.4 : 1;
+    for (const pass of [0, 1]) {
+      ctx.beginPath();
+      for (const s of b.segs) { ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); }
+      ctx.strokeStyle = pass ? '#ffffff' : b.col;
+      ctx.globalAlpha = k * fl * (pass ? 1 : 0.45);
+      ctx.lineWidth = (pass ? 2.2 : 9) / sc;
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+}
+// Koch-snowflake shockwaves (screen space)
+let KOCH = null;
+function kochPts() {
+  let pts = [];
+  for (let i = 0; i < 3; i++) { const a = -Math.PI / 2 + i * 2.0944; pts.push([Math.cos(a), Math.sin(a)]); }
+  for (let it = 0; it < 4; it++) {
+    const np = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length];
+      const dx = (bx - ax) / 3, dy = (by - ay) / 3;
+      const p1 = [ax + dx, ay + dy], p3 = [ax + 2 * dx, ay + 2 * dy];
+      const c = Math.cos(-Math.PI / 3), s = Math.sin(-Math.PI / 3);
+      const p2 = [p1[0] + dx * c - dy * s, p1[1] + dx * s + dy * c];
+      np.push([ax, ay], p1, p2, p3);
+    }
+    pts = np;
+  }
+  return pts;
+}
+function wave(sx, sy, maxR, col, dur = 0.7) { waves.push({ x: sx, y: sy, t: 0, dur, maxR, col, rot: rand(0, 6.28), spin: rand(-2, 2) }); }
+function drawWaves() {
+  if (!KOCH) KOCH = kochPts();
+  for (const w of waves) {
+    const k = w.t / w.dur, r = easeOut(k) * w.maxR;
+    ctx.save(); ctx.translate(w.x, w.y); ctx.rotate(w.rot + w.spin * k);
+    ctx.beginPath();
+    KOCH.forEach((p, i) => i ? ctx.lineTo(p[0] * r, p[1] * r) : ctx.moveTo(p[0] * r, p[1] * r));
+    ctx.closePath();
+    ctx.globalAlpha = (1 - k) * 0.9; ctx.lineWidth = 2 + 8 * (1 - k); ctx.strokeStyle = w.col; ctx.stroke();
+    ctx.globalAlpha = (1 - k) * 0.12; ctx.fillStyle = w.col; ctx.fill();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+function popup(wx, wy, text, col, size = 1, life = 0.9) { pops.push({ x: wx, y: wy, text, col, size, life, max: life }); }
+function drawPops() {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const p of pops) {
+    const k = 1 - p.life / p.max;
+    const [sx, sy] = toScreen(p.x, p.y);
+    const sc = (k < 0.15 ? easeOutBack(k / 0.15) : 1) * p.size;
+    const fs = U * 6.5 * sc;
+    ctx.globalAlpha = k > 0.7 ? (1 - k) / 0.3 : 1;
+    ctx.font = `900 ${fs}px ${FONT}`;
+    ctx.lineWidth = fs * 0.2; ctx.strokeStyle = '#111'; ctx.lineJoin = 'round';
+    const y = sy - k * U * 12;
+    ctx.strokeText(p.text, sx, y); ctx.fillStyle = p.col; ctx.fillText(p.text, sx, y);
+  }
+  ctx.globalAlpha = 1;
+}
+function addShake(t) { trauma = Math.min(1, trauma + t); }
+
+// ---------- game state ----------
+const game = {
+  mode: 'title', score: 0, shown: 0, lives: 3, combo: 0, best: 0, level: 0, hits: 0, noteN: 1,
+  phase: 'wait', timer: 0.8, mole: null, overT: 0, attractT: 0.5, banner: null, scoreBump: 0, rank: -1, maxCombo: 0,
+};
+let scores = store.get('fracamole_scores', []);
+game.best = scores.length ? scores[0].s : 0;
+const press = [0, 0, 0, 0], flash = [0, 0, 0, 0];
+const MAX_LIVES = 5;
+
+function difficulty() {
+  const L = game.level;
+  return {
+    life: Math.max(0.55, 1.7 * Math.pow(0.955, L)),
+    wait: rand(0.1, 0.32) * Math.max(0.35, Math.pow(0.97, L)),
+    zoom: Math.max(0.3, 0.6 * Math.pow(0.975, L)),
+  };
+}
+function startGame() {
+  audioInit();
+  game.mode = 'play'; game.score = 0; game.shown = 0; game.lives = 3; game.combo = 0; game.level = 0; game.hits = 0;
+  game.maxCombo = 0; game.mole = null; game.phase = 'wait'; game.timer = 0.55; game.rank = -1;
+  zoom = null; cam.x = 0; cam.y = 0; cam.z = 1; cam.rot = 0;
+  sfx.start();
+  game.banner = { text: 'GO!', sub: 'whack with the arrows', t: 0, dur: 0.9, col: '#FFD100' };
+  wave(CX, CY, Math.max(W, H) * 0.8, '#ffffff', 0.6);
+}
+function spawnMole() {
+  const D = difficulty();
+  let dir = (Math.random() * 4) | 0;
+  if (game.mole && dir === game.mole.dir && Math.random() < 0.6) dir = (dir + 1 + ((Math.random() * 3) | 0)) % 4;
+  game.mole = { dir, up: 0, state: 'rise', life: D.life, maxLife: D.life, golden: game.level >= 3 && Math.random() < 0.09, hitT: 0 };
+  game.phase = 'mole';
+  sfx.pop();
+}
+function whack(d) {
+  press[d] = 1;
+  if (game.mode !== 'play') return;
+  const m = game.mole;
+  if (game.phase !== 'mole' || !m || !(m.state === 'rise' || m.state === 'up')) return;
+  if (d === m.dir) hit(m); else wrong(d);
+}
+function hit(m) {
+  const frac = clamp(m.life / m.maxLife, 0, 1);
+  game.combo++; game.hits++; game.maxCombo = Math.max(game.maxCombo, game.combo);
+  const mult = 1 + Math.floor(game.combo / 4);
+  const pts = Math.round((100 + 150 * frac) * mult * (m.golden ? 3 : 1) / 10) * 10;
+  game.score += pts; game.scoreBump = 1;
+  m.state = 'hit'; m.hitT = 0;
+  const hx = DX[m.dir] * HOFF, hy = DY[m.dir] * HOFF;
+  const cols = m.golden ? ['#FFE14D', '#FFF6C2', '#FFB300', '#ffffff'] : [DCOL[m.dir], '#ffffff', '#FF3B3B', DCOL[(m.dir + 2) % 4]];
+  burst(hx, hy - HR * 0.3, m.golden ? 46 : 30, cols, m.golden ? 760 : 560);
+  zap(hx, hy - HR * 0.2, m.golden ? '#FFD100' : DCOL[m.dir]);
+  if (game.combo >= 6) zap(hx, hy - HR * 0.2, '#ffffff');
+  popup(hx, hy - HR * 1.4, '+' + pts, m.golden ? '#FFE14D' : '#ffffff', m.golden ? 1.4 : 1);
+  if (mult > 1 && game.combo % 4 === 0) popup(0, -0.02, 'COMBO ×' + mult, DCOL[(game.combo / 4) % 4], 1.3, 1.1);
+  if (frac > 0.75) popup(hx, hy + HR * 0.4, 'LIGHTNING!', '#FFD100', 0.75, 0.8);
+  const [sx, sy] = toScreen(hx, hy);
+  wave(sx, sy, B * 0.6, m.golden ? '#FFD100' : DCOL[m.dir], 0.5);
+  addShake(m.golden ? 0.55 : 0.35);
+  flashA = m.golden ? 0.5 : 0.22; flashCol = m.golden ? '255,220,80' : '255,255,255';
+  hitstop = m.golden ? 0.09 : 0.055;
+  sfx.hit(game.noteN++, game.combo, m.golden);
+  game.phase = 'hitpause'; game.timer = 0.13;
+}
+function wrong(d) {
+  flash[d] = 1;
+  sfx.wrong();
+  addShake(0.45); flashA = 0.28; flashCol = '255,40,40';
+  popup(DX[d] * HOFF, DY[d] * HOFF - HR, 'WRONG HOLE', '#ff5a5a', 0.75);
+  loseLife();
+}
+function loseLife() {
+  game.combo = 0; game.lives--;
+  if (game.lives <= 0) {
+    if (game.mole) { game.mole.state = 'hide'; }
+    gameOver();
+  }
+}
+function gameOver() {
+  game.mode = 'over'; game.overT = 0; game.attractT = 1.2;
+  sfx.over();
+  addShake(0.7); flashA = 0.45; flashCol = '255,40,40';
+  scores.push({ s: game.score, d: game.level, t: Date.now() });
+  scores.sort((a, b) => b.s - a.s); scores = scores.slice(0, 5);
+  game.rank = scores.findIndex(e => e.s === game.score && e.d === game.level);
+  game.best = scores[0].s; store.set('fracamole_scores', scores);
+}
+function onZoomLanded(d) {
+  wave(CX, CY, Math.max(W, H) * 0.75, DCOL[d], 0.55);
+  if (game.mode !== 'play') return;
+  game.mole = null;
+  game.level++;
+  const D = difficulty();
+  game.phase = 'wait'; game.timer = D.wait;
+  if (game.level % 5 === 0) {
+    let sub = 'magnification ×' + fmtMag(game.level);
+    if (game.level % 10 === 0 && game.lives < MAX_LIVES) { game.lives++; sub = '+1 LIFE!'; sfx.life(); }
+    game.banner = { text: 'DEPTH ' + game.level, sub, t: 0, dur: 1.1, col: DCOL[(game.level / 5) % 4] };
+    burst(0, 0, 40, DCOL, 700);
+  }
+}
+
+// ---------- update ----------
+let now = 0, last = performance.now();
+function update(dt) {
+  now += dt;
+  // decays
+  for (let d = 0; d < 4; d++) { press[d] = Math.max(0, press[d] - dt * 4); flash[d] = Math.max(0, flash[d] - dt * 2.5); }
+  flashA = Math.max(0, flashA - dt * 2.2);
+  trauma = Math.max(0, trauma - dt * 1.8);
+  const sh = trauma * trauma * U * 4;
+  shakeX = rand(-sh, sh); shakeY = rand(-sh, sh);
+  game.scoreBump = Math.max(0, game.scoreBump - dt * 4);
+  game.shown += (game.score - game.shown) * Math.min(1, dt * 12);
+  if (Math.abs(game.score - game.shown) < 1) game.shown = game.score;
+  if (game.banner) { game.banner.t += dt; if (game.banner.t > game.banner.dur) game.banner = null; }
+
+  if (hitstop > 0) { hitstop -= dt; return; }
+
+  updateZoom(dt);
+  updateParts(dt);
+  for (let i = pops.length - 1; i >= 0; i--) { pops[i].life -= dt; if (pops[i].life <= 0) pops.splice(i, 1); }
+  for (let i = bolts.length - 1; i >= 0; i--) { bolts[i].life -= dt; if (bolts[i].life <= 0) bolts.splice(i, 1); }
+  for (let i = waves.length - 1; i >= 0; i--) { waves[i].t += dt; if (waves[i].t >= waves[i].dur) waves.splice(i, 1); }
+
+  const m = game.mole;
+  if (m) {
+    if (m.state === 'rise') { m.up = Math.min(1, m.up + dt / 0.13); m.life -= dt * 0.5; if (m.up >= 1) m.state = 'up'; }
+    else if (m.state === 'up') {
+      m.life -= dt;
+      if (m.life <= 0 && game.mode === 'play') {
+        m.state = 'hide';
+        sfx.escape(); addShake(0.25);
+        popup(DX[m.dir] * HOFF, DY[m.dir] * HOFF - HR * 1.2, 'TOO SLOW!', '#ff8a3d', 0.8);
+        loseLife();
+      }
+    } else if (m.state === 'hide') { m.up = Math.max(0, m.up - dt / 0.14); if (m.up <= 0) { game.mole = null; if (game.mode === 'play') { game.phase = 'wait'; game.timer = difficulty().wait + 0.15; } } }
+    else if (m.state === 'hit') { m.hitT += dt; if (zoom) m.up = Math.max(0, m.up - dt * 5); }
+  }
+
+  if (game.mode === 'play') {
+    if (game.phase === 'wait') { game.timer -= dt; if (game.timer <= 0) spawnMole(); }
+    else if (game.phase === 'hitpause') { game.timer -= dt; if (game.timer <= 0) { game.phase = 'zoom'; startZoom(game.mole.dir, difficulty().zoom); } }
+  } else {
+    // attract mode: keep falling forever into random holes
+    if (game.mode === 'over') game.overT += dt;
+    if (!zoom) {
+      if (game.mole && game.mole.state !== 'hide') game.mole.state = 'hide';
+      game.attractT -= dt;
+      if (game.attractT <= 0) { startZoom((Math.random() * 4) | 0, game.mode === 'title' ? 1.25 : 1.6); game.attractT = 0.35; }
+    }
+    if (game.mode === 'over' && game.overT > 14) { game.mode = 'title'; }
+  }
+}
+
+// ---------- HUD & overlays ----------
+function txt(s, x, y, size, col, align = 'center', stroke = true, weight = 900) {
+  ctx.font = `${weight} ${size}px ${FONT}`; ctx.textAlign = align; ctx.textBaseline = 'middle';
+  if (stroke) { ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.22; ctx.strokeStyle = '#111'; ctx.strokeText(s, x, y); }
+  ctx.fillStyle = col; ctx.fillText(s, x, y);
+}
+// Sierpinski triangles for lives
+function sierp(x, y, s, depth) {
+  if (depth === 0) { ctx.moveTo(x, y - s * 0.577); ctx.lineTo(x + s / 2, y + s * 0.289); ctx.lineTo(x - s / 2, y + s * 0.289); ctx.closePath(); return; }
+  const h = s / 2;
+  sierp(x, y - h * 0.577 * 0.5 - h * 0.0, h, depth - 1);
+  sierp(x - h / 2, y + h * 0.289, h, depth - 1);
+  sierp(x + h / 2, y + h * 0.289, h, depth - 1);
+}
+function badge(x, y, size) {
+  // simple brand badge: the words, in Makey Makey red & white
+  ctx.font = `900 ${size}px ${FONT}`;
+  const w = ctx.measureText('MAKEY MAKEY').width + size * 1.2;
+  rrect(x, y - size * 0.8, w, size * 1.6, size * 0.4);
+  ctx.fillStyle = '#E5232B'; ctx.fill(); ctx.lineWidth = size * 0.14; ctx.strokeStyle = '#fff'; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText('MAKEY MAKEY', x + size * 0.6, y + size * 0.05);
+  return w;
+}
+function drawHUD() {
+  const pad = U * 3.2, small = U * 2.6;
+  if (game.mode === 'play') {
+    txt('SCORE', pad, pad + small * 0.5, small, '#FFD100', 'left');
+    const bump = 1 + game.scoreBump * 0.25;
+    txt(Math.round(game.shown).toLocaleString(), pad, pad + small * 2.1, U * 7 * bump, '#ffffff', 'left');
+    txt('DEPTH ' + game.level + '   ×' + fmtMag(game.level), pad, pad + small * 4.1, small, '#ffffff', 'left');
+    // lives
+    const ls = U * 5.4;
+    for (let i = 0; i < Math.max(3, game.lives); i++) {
+      const x = W - pad - ls * 0.5 - i * ls * 1.1, y = pad + ls * 0.55;
+      ctx.beginPath(); sierp(x, y, ls, 3);
+      ctx.fillStyle = i < game.lives ? DCOL[i % 4] : 'rgba(255,255,255,0.15)'; ctx.fill();
+    }
+    if (game.combo >= 2) {
+      const mult = 1 + Math.floor(game.combo / 4);
+      const pulse = 1 + 0.08 * Math.sin(now * 14);
+      txt(game.combo + ' COMBO' + (mult > 1 ? '  ×' + mult : ''), W - pad, pad + ls * 1.5, small * 1.25 * pulse, DCOL[game.combo % 4], 'right');
+    }
+  }
+  // brand + controls
+  const bs = U * 1.9;
+  badge(pad, H - pad - bs * 0.3, bs);
+  ctx.globalAlpha = 0.7;
+  txt((muted ? '🔇' : '🔊') + ' M', W - pad, H - pad - bs * 0.3, bs * 1.1, '#ffffff', 'right', false, 700);
+  ctx.globalAlpha = 1;
+}
+function drawBanner() {
+  const b = game.banner; if (!b) return;
+  const k = b.t / b.dur;
+  const s = k < 0.2 ? easeOutBack(k / 0.2) : 1;
+  ctx.globalAlpha = k > 0.75 ? (1 - k) / 0.25 : 1;
+  txt(b.text, W / 2, H * 0.24, U * 11 * s, b.col);
+  if (b.sub) txt(b.sub, W / 2, H * 0.24 + U * 8, U * 3.4 * s, '#ffffff');
+  ctx.globalAlpha = 1;
+}
+function drawTitle() {
+  ctx.fillStyle = 'rgba(8,4,6,0.45)'; ctx.fillRect(0, 0, W, H);
+  const word = 'FRAC-A-MOLE', fs = Math.min(U * 13, W / 7.2);
+  ctx.font = `900 ${fs}px ${FONT}`;
+  const total = ctx.measureText(word).width;
+  let x = W / 2 - total / 2;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i], w = ctx.measureText(ch).width;
+    const y = H * 0.3 + Math.sin(now * 3 + i * 0.6) * U * 1.6;
+    const col = ch === '-' ? '#ffffff' : (i < 4 ? '#E5232B' : DCOL[i % 4]);
+    txt(ch, x + w / 2, y, fs, col);
+    x += w;
+  }
+  txt('whack a mole · dive into its hole · four more are waiting · forever', W / 2, H * 0.3 + fs * 0.85, Math.min(U * 2.8, W / 34), '#ffffff', 'center', true, 700);
+  if (Math.sin(now * 5) > -0.3) txt('PRESS ANY ARROW TO PLAY', W / 2, H * 0.72, U * 4.6, '#FFD100');
+  txt('← ↑ → ↓  =  the four holes', W / 2, H * 0.72 + U * 6, U * 2.6, '#ffffff', 'center', true, 700);
+  if (game.best) txt('BEST  ' + game.best.toLocaleString(), W / 2, H * 0.72 + U * 10.5, U * 3, '#2ECC55');
+  ctx.font = `900 ${U * 2.4}px ${FONT}`;
+  const bw = ctx.measureText('MAKEY MAKEY').width + U * 2.4 * 1.2;
+  badge(W / 2 - bw / 2, H * 0.3 - fs * 0.95, U * 2.4);
+}
+function drawTree(x, y, len, ang, depth, maxD, grow, paths) {
+  const lvl = maxD - depth;
+  const g = clamp(grow - lvl, 0, 1);
+  if (g <= 0) return;
+  const l = len * easeOut(g);
+  const sway = Math.sin(now * 1.6 + lvl * 0.7) * 0.04 * lvl;
+  const x2 = x + Math.cos(ang + sway) * l, y2 = y + Math.sin(ang + sway) * l;
+  paths[lvl].moveTo(x, y); paths[lvl].lineTo(x2, y2);
+  if (depth > 0) {
+    const spread = 0.42 + 0.08 * Math.sin(now * 0.8);
+    drawTree(x2, y2, len * 0.74, ang - spread, depth - 1, maxD, grow, paths);
+    drawTree(x2, y2, len * 0.74, ang + spread, depth - 1, maxD, grow, paths);
+  }
+}
+function drawOver() {
+  const k = Math.min(1, game.overT * 3);
+  ctx.fillStyle = `rgba(8,4,6,${0.72 * k})`; ctx.fillRect(0, 0, W, H);
+  // a fractal tree that grows as deep as you dove
+  const maxD = clamp(2 + Math.floor(game.level / 2), 2, 11);
+  const paths = []; for (let i = 0; i <= maxD; i++) paths.push(new Path2D());
+  const tl = Math.min(H * 0.17, W * 0.2);
+  drawTree(W / 2, H, tl, -Math.PI / 2, maxD, maxD, game.overT * 9, paths);
+  for (let i = 0; i <= maxD; i++) {
+    ctx.lineWidth = Math.max(1, (maxD - i + 1) * U * 0.32);
+    ctx.strokeStyle = i === maxD ? DCOL[(Math.floor(now * 2)) % 4] : (i > maxD - 3 ? DCOL[i % 4] : '#E5232B');
+    ctx.globalAlpha = 0.55; ctx.lineCap = "round"; ctx.stroke(paths[i]);
+  }
+  ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+
+  const s = easeOutBack(Math.min(1, game.overT * 2.5));
+  txt('GAME OVER', W / 2, H * 0.13, Math.min(U * 10, W / 6.5) * s, '#E5232B');
+  txt(game.score.toLocaleString(), W / 2, H * 0.25, U * 11 * s, '#ffffff');
+  txt('depth ' + game.level + ' · zoomed ×' + fmtMag(game.level) + ' · best combo ' + game.maxCombo, W / 2, H * 0.33, Math.min(U * 2.8, W / 30), '#FFD100', 'center', true, 700);
+  if (game.rank === 0 && scores.length > 1 && Math.sin(now * 8) > 0) txt('NEW BEST!', W / 2, H * 0.385, U * 4, '#2ECC55');
+  // top scores
+  const top = H * 0.45, rowH = U * 4.4;
+  txt('TOP SCORES', W / 2, top, U * 3, '#ffffff');
+  scores.forEach((e, i) => {
+    const y = top + rowH * (i + 1), me = i === game.rank;
+    const col = me ? DCOL[Math.floor(now * 6) % 4] : '#ffffff';
+    txt((i + 1) + '.', W / 2 - U * 16, y, U * 3, col, 'left');
+    txt(e.s.toLocaleString(), W / 2 + U * 1, y, U * 3, col, 'right');
+    txt('depth ' + e.d, W / 2 + U * 16, y, U * 2.4, me ? col : 'rgba(255,255,255,0.6)', 'right', true, 700);
+  });
+  if (game.overT > 1.0 && Math.sin(now * 5) > -0.3) txt('PRESS ANY ARROW TO PLAY AGAIN', W / 2, H * 0.84, Math.min(U * 4, W / 18), '#FFD100');
+}
+
+// ---------- render ----------
+function render() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = HOLE_BG; ctx.fillRect(0, 0, W, H);
+  viewR = Math.hypot(W, H) / 2 / S() + 0.05;
+
+  applyCam();
+  // start drawing from two ancestors up so the surroundings are self-similar too
+  const path = history.slice(-2);
+  let x = 0, y = 0, s = 1;
+  for (let i = path.length - 1; i >= 0; i--) { const ps = s / K; x -= DX[path[i]] * HOFF * ps; y -= DY[path[i]] * HOFF * ps; s = ps; }
+  drawBoard(x, y, s, worldDepth - path.length, path, now);
+  drawBolts();
+  drawParts();
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  drawWaves();
+  drawPops();
+  // zoom tunnel vignette
+  if (zoom) {
+    const e = Math.sin(Math.PI * zoom.t);
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.hypot(W, H) / 2);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${0.55 * e})`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (flashA > 0) { ctx.fillStyle = `rgba(${flashCol},${flashA})`; ctx.fillRect(0, 0, W, H); }
+  if (game.mode === 'title') drawTitle();
+  if (game.mode === 'over') drawOver();
+  drawBanner();
+  drawHUD();
+}
+
+function frame(t) {
+  const dt = Math.min(0.05, (t - last) / 1000); last = t;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+
+// ---------- input ----------
+const KEYS = { ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3, w: 0, d: 1, s: 2, a: 3, W: 0, D: 1, S: 2, A: 3 };
+const lastKey = {};
+function anyStart() {
+  if (game.mode === 'title') { startGame(); return true; }
+  if (game.mode === 'over') { if (game.overT > 1.0) startGame(); return true; }
+  return false;
+}
+window.addEventListener('keydown', e => {
+  audioInit();
+  if (e.key === 'm' || e.key === 'M') { toggleMute(); return; }
+  const d = KEYS[e.key];
+  if (d === undefined && e.key !== ' ' && e.key !== 'Enter') return;
+  e.preventDefault();
+  if (e.repeat) return;
+  const t = performance.now();
+  if (lastKey[e.key] && t - lastKey[e.key] < 70) return;      // debounce Makey Makey contact bounce
+  lastKey[e.key] = t;
+  if (anyStart()) { if (d !== undefined) press[d] = 1; return; }
+  if (d !== undefined) whack(d);
+});
+cv.addEventListener('pointerdown', e => {
+  audioInit();
+  const r = cv.getBoundingClientRect();
+  const sx = e.clientX - r.left, sy = e.clientY - r.top;
+  // mute toggle hotspot (bottom-right)
+  if (sx > W - U * 12 && sy > H - U * 9) { toggleMute(); return; }
+  if (anyStart()) return;
+  const [wx, wy] = toWorld(sx, sy);
+  let best = -1, bd = 1e9;
+  for (let d = 0; d < 4; d++) {
+    const dd = Math.hypot(wx - DX[d] * HOFF, wy - DY[d] * HOFF);
+    if (dd < bd) { bd = dd; best = d; }
+  }
+  if (best >= 0 && bd < HR * 1.6) whack(best);
+});
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  U = Math.min(W, H) / 100;
+  B = Math.min(W * 0.9, H * 0.7);
+  CX = W / 2; CY = H * 0.55;
+}
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(t => { last = t; frame(t); });
+</script>
+</body>
+</html>
