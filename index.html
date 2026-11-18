@@ -78,6 +78,11 @@ const EXTRA = {
   'tic-tac-mania':             { title: 'Tic-Tac-Mania' },
   'Visual-convos':             { title: 'Visual Convos' },
 };
+// Projects living in a folder of this site instead of their own repo (shown unless a repo of that name exists).
+const MANUAL = [
+  { name: 'top-ensemble', has_pages: false, homepage: 'https://wakeupsilver.github.io/top-ensemble/', pushed_at: '2026-11-18T19:00:00Z', fork: false,
+    description: 'Top Ensemble: spin a top across a table and the camera turns it into a conductor for a 12-piece circus band. A gift for AnnMarie Thomas.' },
+];
 // Used only if GitHub can't be reached (offline, rate limit).
 const FALLBACK = [
   ['top-ensemble', true, 'Top Ensemble: spin a top across a table and the camera turns it into a conductor for a 12-piece circus band. A gift for AnnMarie Thomas.'],
@@ -107,6 +112,7 @@ const pretty = n => n.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase
 const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 function render(repos) {
+  repos = [...repos, ...MANUAL.filter(m => !repos.some(r => r.name === m.name))];
   const list = repos
     .filter(r => !r.archived && !HIDE.includes(r.name))
     // Most recently published first, so whatever was worked on last is at the top.
