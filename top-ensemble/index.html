@@ -74,6 +74,14 @@ body.clean #hud, body.clean #controls, body.clean #dots { opacity: 0 !important;
 .dot.pop { animation: pop .5s cubic-bezier(.3,1.8,.5,1); }
 @keyframes pop { 0% { transform: scale(.4); } 100% { transform: scale(1); } }
 
+#solo { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 14px; padding: 7px 14px; border-radius: 999px; font-weight: 900; font-size: 14px;
+  background: rgba(26,15,36,.8); border: 2px solid var(--c, var(--gold)); color: var(--c, var(--gold)); box-shadow: 0 0 18px var(--c, var(--gold));
+  opacity: 0; transform: translateY(-10px) scale(.8); transition: opacity .4s, transform .4s cubic-bezier(.3,1.8,.5,1); pointer-events: none; }
+#solo.show { opacity: 1; transform: none; animation: soloGlow 1.2s ease-in-out infinite; }
+#solo b { font-size: 17px; } #solo i { font-style: normal; font-size: 11px; letter-spacing: 2px; margin-left: 4px; color: var(--cream); }
+@keyframes soloGlow { 50% { box-shadow: 0 0 4px var(--c, var(--gold)); } }
+body.clean #solo { opacity: 0 !important; }
+@media (max-width: 600px) { #solo { top: auto; bottom: 64px; right: 12px; font-size: 12px; } }
 #controls { position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center;
   max-width: calc(100vw - 24px); }
 #controls button { width: 40px; height: 40px; border-radius: 50%; border: 2px solid rgba(246,231,193,.45); background: rgba(26,15,36,.7);
@@ -129,6 +137,7 @@ body.demo .sens { display: none; }
   <div id="status" class="pill">…</div>
 </div>
 <div id="dots"></div>
+<div id="solo"></div>
 <div id="ticker"></div>
 <div id="banner"></div>
 <div id="hint">Spin a top on the table ✨ <small>Tap it on screen if I miss it.</small></div>
@@ -136,6 +145,7 @@ body.demo .sens { display: none; }
 <div id="controls">
   <label class="sens" title="How easily something counts as the top">sensitivity <input type="range" id="sens" min="0" max="1" step="0.01" value="0.55"></label>
   <button data-act="reset" title="Re-learn the empty table (R)">🔄</button>
+  <button data-act="solo" title="Bring in a soloist, or send one off (S)">🎺</button>
   <button data-act="shuffle" title="New stage layout and key (N)">🎲</button>
   <button data-act="flip" class="camonly" title="Switch camera (F)">📷</button>
   <button data-act="feed" title="Show or hide the camera picture (V)">👁</button>
@@ -161,7 +171,7 @@ body.demo .sens { display: none; }
       </g>
     </svg>
     <h1>Top<br>Ensemble</h1>
-    <p class="tag">Spin a top across the table and it conducts the band. Every patch of table is a different musician, so wherever your top wanders, the music follows.</p>
+    <p class="tag">Spin a top across the table and it conducts the band. Every patch of table is a different musician, so wherever your top wanders, the music follows. Now and then a soloist steps up and plays a note for every step of its path.</p>
     <div class="btns">
       <button id="go-cam" class="big">📷 Start the camera</button>
       <button id="go-demo">🌀 Try the demo top</button>
@@ -606,6 +616,64 @@ window.Sound = (() => {
     return o;
   }
 
+  // ---- Soloists: notes laid along the top's path, taking turns ----
+  const SOLOISTS = [
+    { id: 'cornet',  name: 'Circus Cornet', emoji: '📯', color: '#ffcf5a' },
+    { id: 'musicbox', name: 'Music Box',    emoji: '🎁', color: '#ffd6f0' },
+    { id: 'flute',   name: 'Flute',         emoji: '🍃', color: '#bff3ff' },
+    { id: 'whistle', name: 'Slide Whistle', emoji: '🐦', color: '#c9ff9e' },
+    { id: 'vibes',   name: 'Vibraphone',    emoji: '✨', color: '#b9a8ff' },
+  ];
+  const SOLO_PLAY = {
+    cornet: (t, f, v, p) => {
+      voice(t, { type: 'sawtooth', f, dur: .32, vol: .13 * v, a: .02, p, rv: .25, dl: .15, filt: { f: 900 + 2200 * v, fEnd: 700, q: 2, dur: .3 } });
+      voice(t, { type: 'sawtooth', f: f * 1.003, dur: .3, vol: .07 * v, a: .02, p, rv: .2, filt: { f: 1600, fEnd: 600 } });
+    },
+    musicbox: (t, f, v, p) => fm(t, f * 2, { ratio: 5.04, index: 1.2, iDecay: .06, dur: 1.1, vol: .16 * v, p, rv: .45, dl: .3 }),
+    flute: (t, f, v, p) => {
+      voice(t, { f, dur: .45, vol: .16 * v, a: .05, p, rv: .45, dl: .2 });
+      voice(t, { type: 'triangle', f: f * 2, dur: .35, vol: .03 * v, a: .05, p, rv: .4 });
+      noise(t, { dur: .12, vol: .025 * v, type: 'bandpass', f: f * 2, q: 3, p, a: .02 });
+    },
+    whistle: (t, f, v, p) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(f * 2 * 0.86, t); o.frequency.exponentialRampToValueAtTime(f * 2, t + 0.07);
+      env(g, t, .02, .12 * v, .32); o.connect(g); out(g, p, .35, .2); o.start(t); o.stop(t + .4);
+    },
+    vibes: (t, f, v, p) => {
+      fm(t, f, { ratio: 1, index: .8, iDecay: .4, dur: 1.6, vol: .15 * v, p, rv: .4, dl: .25 });
+      fm(t, f * 4, { ratio: 1, index: .3, iDecay: .1, dur: .3, vol: .03 * v, p });
+    },
+  };
+  const solo = { on: false, i: -1, until: 6, lastT: 0 };
+  let soloListener = null;
+  const NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+
+  function soloTurn(bar) {
+    if (bar < solo.until) return;
+    if (solo.on) { solo.on = false; solo.until = bar + 2 + ((Math.random() * 3) | 0); }
+    else if (ctl.found) {
+      let i; do { i = (Math.random() * SOLOISTS.length) | 0; } while (i === solo.i && SOLOISTS.length > 1);
+      solo.on = true; solo.i = i; solo.until = bar + 4 + ((Math.random() * 5) | 0);
+    } else return;
+    if (soloListener) soloListener(solo.on ? SOLOISTS[solo.i] : null);
+  }
+
+  // Called by the game each time the top has travelled one "note length" along its path.
+  // Pitch comes straight from position: higher on screen is higher, so the same spot is the same note.
+  function soloNote(x, y, v) {
+    if (!ctx || muted || !solo.on) return null;
+    const t = ctx.currentTime;
+    if (t - solo.lastT < 0.075) return null;
+    solo.lastT = t;
+    // a fixed 'pitch landscape' over the table: rises toward the top of the screen, with ripples so a path makes a tune
+    const deg = Math.round((1 - y) * 10 + x * 4 + 2.2 * Math.sin(x * 31 + y * 7) + 1.6 * Math.sin(y * 27 - x * 11));
+    const m = scaleNote(deg, 0);
+    const s = SOLOISTS[solo.i];
+    SOLO_PLAY[s.id](t + 0.005, mf(m), Math.min(1, .55 + v * .6), (x - .5) * 1.6);
+    return { m, name: NAMES[((m % 12) + 12) % 12], color: s.color };
+  }
+
   function tick() {
     if (!ctx) return;
     while (nextT < ctx.currentTime + 0.12) { schedule(step, nextT); nextT += S16; step++; }
@@ -613,6 +681,7 @@ window.Sound = (() => {
 
   function schedule(st, t) {
     const s = st % 16, bar = Math.floor(st / 16), sw = s % 2 ? S16 * 0.12 : 0;
+    if (s === 0) soloTurn(bar);
     if (s === 0 && drone) drone.o.forEach(o => o.frequency.setTargetAtTime(mf(key + chordAt(bar)[0] - 24), t, 0.15));
     zones.forEach((z, i) => {
       const a = acts[i] || 0; if (a < 0.05) return;
@@ -689,7 +758,10 @@ window.Sound = (() => {
   function setZones(z, a) { zones = z; acts = a; }
   function setMuted(m) { muted = m; if (master) master.gain.setTargetAtTime(m ? 0 : 0.85, ctx.currentTime, 0.05); }
 
-  return { init, setZones, control, accent, bounce, fanfare, newScene, setMuted, onNote: f => (listener = f), now, get muted() { return muted; }, get ready() { return !!ctx; } };
+  function forceSolo() { solo.until = 0; soloTurn(Math.floor(step / 16)); solo.until = Math.floor(step / 16) + (solo.on ? 6 : 3); }
+
+  return { init, setZones, control, accent, bounce, fanfare, newScene, setMuted, onNote: f => (listener = f), now,
+    soloNote, forceSolo, onSolo: f => (soloListener = f), get solo() { return solo.on ? SOLOISTS[solo.i] : null; }, get muted() { return muted; }, get ready() { return !!ctx; } };
 })();
 </script>
 <script>
@@ -777,6 +849,8 @@ window.Demo = (() => {
   let showFeed = true, debug = false, uiHidden = false, shake = 0, flash = null, kick = 0, spin = 0, energy = 0, rounds = 0;
   let lastT = performance.now(), lastBounce = 0, pdir = null, lostSince = 0, statusT = 0, celebrating = false;
   const trail = [], parts = [], noteQ = [];
+  let travel = 0, lastPos = null, soloist = null;
+  const NOTE_STEP = 0.028;   // how far (in table widths) the top travels per solo note
   const view = { ox: 0, oy: 0, w: 1, h: 1 };
 
   // ---------- layout ----------
@@ -857,6 +931,17 @@ window.Demo = (() => {
     }
     if (parts.length > 700) parts.splice(0, parts.length - 700);
   }
+  function stamp(x, y, n) {
+    parts.push({ kind: 'stamp', x, y, life: 0, max: 3.4, col: n.color, ch: n.name, size: 13 });
+    spawn(x, y, 5, n.color, 'spark', .45);
+    if (parts.length > 700) parts.splice(0, parts.length - 700);
+  }
+  Sound.onSolo(s => {
+    const b = $('#solo');
+    if (s) { chip(s, 'takes a solo!'); b.innerHTML = `<b>${s.emoji}</b> ${s.name} <i>SOLO</i>`; b.style.setProperty('--c', s.color); b.classList.add('show'); }
+    else { if (soloist) chip(soloist, 'takes a bow'); b.classList.remove('show'); }
+    soloist = s;
+  });
   function ring(x, y, col, max = 120, w = 6) { parts.push({ kind: 'ring', x, y, life: 0, max: .7, col, size: max, w }); }
 
   function chip(z, text) {
@@ -930,6 +1015,17 @@ window.Demo = (() => {
       if (z !== cur) { enter(z, cur); cur = z; }
       acts[z] = 1;
       trail.push({ x: st.x, y: st.y, t, c: zones[z].color, e: energy });
+      // solo notes laid along the path
+      if (lastPos) {
+        const d = Math.hypot(st.x - lastPos.x, (st.y - lastPos.y) * srcH / srcW);
+        if (d > 0.0015) travel += d;
+        if (travel >= NOTE_STEP) {
+          travel = 0;
+          const n = Sound.soloNote(st.x, st.y, energy);
+          if (n) { const [x, y] = P(st.x, st.y); stamp(x, y, n); }
+        }
+      }
+      lastPos = { x: st.x, y: st.y };
       // bounce: a sharp change of direction at speed (tops clacking into things)
       const sp = st.speed;
       if (sp > 0.12) {
@@ -940,7 +1036,7 @@ window.Demo = (() => {
         }
         pdir = dir;
       }
-    } else if (cur !== -1) cur = -1;
+    } else { lastPos = null; if (cur !== -1) cur = -1; }
     while (trail.length && t - trail[0].t > 2600) trail.shift();
     for (let i = 0; i < acts.length; i++) { if (i !== cur) acts[i] *= Math.exp(-dt / 1.8); pulse[i] *= Math.exp(-dt / 0.2); }
     energy += ((found ? Math.min(1, st.speed / 0.3) : 0) - energy) * Math.min(1, dt * 4);
@@ -1043,6 +1139,17 @@ window.Demo = (() => {
       const q = parts[k]; q.life += dt;
       if (q.life > q.max) { parts.splice(k, 1); continue; }
       const f = q.life / q.max;
+      if (q.kind === 'stamp') {             // a solo note left on the table: a little glowing note-head with its name
+        const pop = Math.min(1, q.life / 0.12), fade = 1 - Math.pow(f, 2);
+        const r = q.size * (0.6 + 0.4 * pop) * (1 + (1 - pop) * .6);
+        g.globalAlpha = fade * .35; g.fillStyle = q.col; g.beginPath(); g.arc(q.x, q.y, r * 1.9, 0, 7); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        g.globalAlpha = fade; g.fillStyle = '#1a0f24'; g.beginPath(); g.arc(q.x, q.y, r, 0, 7); g.fill();
+        g.strokeStyle = q.col; g.lineWidth = 2.5; g.stroke();
+        g.fillStyle = q.col; g.font = `900 ${Math.round(r * 1.05)}px Nunito, system-ui, sans-serif`;
+        g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(q.ch, q.x, q.y + 1);
+        g.globalCompositeOperation = 'lighter'; continue;
+      }
       if (q.kind === 'ring') {
         g.strokeStyle = q.col; g.globalAlpha = 1 - f; g.lineWidth = q.w * (1 - f) + 1;
         g.beginPath(); g.arc(q.x, q.y, 10 + q.size * Math.pow(f, .6), 0, 7); g.stroke(); continue;
@@ -1108,6 +1215,7 @@ window.Demo = (() => {
     mute: () => { Sound.setMuted(!Sound.muted); $('[data-act=mute]').textContent = Sound.muted ? '🔇' : '🔊'; },
     full: () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(() => {}); else document.exitFullscreen(); },
     home: () => { location.reload(); },
+    solo: () => Sound.forceSolo(),
   };
   document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); actions[b.dataset.act](); }));
   $('#go-cam').onclick = () => begin('cam');
@@ -1125,7 +1233,7 @@ window.Demo = (() => {
   addEventListener('keydown', e => {
     if (!mode) return;
     const k = e.key.toLowerCase();
-    const map = { r: 'reset', n: 'shuffle', f: 'flip', v: 'feed', d: 'debug', m: 'mute' };
+    const map = { r: 'reset', n: 'shuffle', f: 'flip', v: 'feed', d: 'debug', m: 'mute', s: 'solo' };
     if (map[k]) actions[map[k]]();
     if (k === 'escape') { uiHidden = !uiHidden; document.body.classList.toggle('clean', uiHidden); }
   });
@@ -1135,7 +1243,7 @@ window.Demo = (() => {
   requestAnimationFrame(loop);
 
   // for testing: window.topEnsemble.start('demo')
-  window.topEnsemble = { start: begin, state: () => ({ mode, cur, visited: visited.size, tracker: Tracker.state, zones: zones.map(z => z.id) }) };
+  window.topEnsemble = { start: begin, state: () => ({ solo: soloist && soloist.name, mode, cur, visited: visited.size, tracker: Tracker.state, zones: zones.map(z => z.id) }) };
 })();
 </script>
 </body>
